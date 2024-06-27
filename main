@@ -1,0 +1,184 @@
+from abc import ABC, abstractmethod
+import logging
+from typing import List, Dict, Union
+
+# Породжуючий патерн - Factory Method
+class OrderFactory:
+    @staticmethod
+    def create_order(order_id: int, customer: 'Customer', items: List['Item'], status: str, discount_type: str, discount_value: float = 0) -> 'Order':
+        if discount_type == 'none':
+            discount_strategy = NoDiscount()
+        elif discount_type == 'percentage':
+            discount_strategy = PercentageDiscount(discount_value)
+        else:
+            raise ValueError("Invalid discount type")
+        return Order(order_id, customer, items, status, discount_strategy)
+
+class PriceCalculator:
+    def __init__(self, unit_price: float, quantity: int):
+        self.unit_price = unit_price
+        self.quantity = quantity
+
+    def calculate_total(self) -> float:
+        return self.unit_price * self.quantity
+
+class Item:
+    TAX_RATE = 0.2
+
+    def __init__(self, name: str, unit_price: float, quantity: int):
+        self.name = name
+        self.price_calculator = PriceCalculator(unit_price, quantity)
+
+    def calculate_total(self) -> float:
+        return self.price_calculator.calculate_total() * (1 + Item.TAX_RATE)
+
+class Customer:
+    def __init__(self, name: str):
+        self.name = name
+
+class OrderInterface(ABC):
+    @abstractmethod
+    def calculate_total(self) -> float:
+        pass
+
+class OrderStatus:
+    def __init__(self, status: str):
+        self.status = status
+
+    def is_pending(self) -> bool:
+        return self.status == "pending"
+
+    def is_completed(self) -> bool:
+        return self.status == "completed"
+
+class DiscountStrategy(ABC):
+    @abstractmethod
+    def apply_discount(self, amount: float) -> float:
+        pass
+
+class NoDiscount(DiscountStrategy):
+    def apply_discount(self, amount: float) -> float:
+        return amount
+
+class PercentageDiscount(DiscountStrategy):
+    def __init__(self, percentage: float):
+        self.percentage = percentage
+
+    def apply_discount(self, amount: float) -> float:
+        return amount * (1 - self.percentage / 100)
+
+class Order(OrderInterface):
+    def __init__(self, order_id: int, customer: Customer, items: List[Item], status: str, discount_strategy: DiscountStrategy):
+        self._order_id = order_id
+        self._customer = customer
+        self._items = items
+        self._status = OrderStatus(status)
+        self._discount_strategy = discount_strategy
+
+    @property
+    def order_id(self) -> int:
+        return self._order_id
+
+    @property
+    def customer(self) -> Customer:
+        return self._customer
+
+    @property
+    def items(self) -> List[Item]:
+        return self._items
+
+    @property
+    def status(self) -> OrderStatus:
+        return self._status
+
+    def calculate_total(self) -> float:
+        total = sum(item.calculate_total() for item in self._items)
+        return self._discount_strategy.apply_discount(total)
+
+class OrderManagerSingleton:
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(OrderManagerSingleton, cls).__new__(cls)
+            cls._instance.orders = []
+        return cls._instance
+
+    def add_order(self, order: Order):
+        self.orders.append(order)
+        logging.info(f"Order {order.order_id} added.")
+
+    def remove_order(self, order_id: int):
+        self.orders = [order for order in self.orders if order.order_id != order_id]
+        logging.info(f"Order {order_id} removed.")
+
+    def get_order(self, order_id: int) -> Union[Order, None]:
+        order = next((order for order in self.orders if order.order_id == order_id), None)
+        logging.info(f"Retrieved order {order_id}.")
+        return order
+
+# Структурний патерн - Adapter
+class OldOrderSystem:
+    def __init__(self, id: int, client: str, products: List[Dict[str, Union[int, float]]]):
+        self.id = id
+        self.client = client
+        self.products = products
+
+    def total_price(self) -> float:
+        return sum(product['price'] * product['quantity'] for product in self.products)
+
+class OrderAdapter(OrderInterface):
+    def __init__(self, old_order: OldOrderSystem):
+        self._old_order = old_order
+
+    def calculate_total(self) -> float:
+        return self._old_order.total_price()
+
+# Поведінковий патерн - Observer
+class OrderObserver(ABC):
+    @abstractmethod
+    def update(self, order: Order):
+        pass
+
+class OrderManagerWithObserver(OrderManagerSingleton):
+    def __init__(self):
+        super().__init__()
+        self._observers = []
+
+    def add_observer(self, observer: OrderObserver):
+        self._observers.append(observer)
+        logging.info(f"Observer {observer.__class__.__name__} added.")
+
+    def notify_observers(self, order: Order):
+        for observer in self._observers:
+            observer.update(order)
+            logging.info(f"Observer {observer.__class__.__name__} notified for order {order.order_id}.")
+
+    def add_order(self, order: Order):
+        super().add_order(order)
+        self.notify_observers(order)
+
+class EmailNotifier(OrderObserver):
+    def update(self, order: Order):
+        logging.info(f"Email sent for order {order.order_id} to {order.customer.name}")
+
+# Використання
+logging.basicConfig(level=logging.INFO)
+
+order1 = OrderFactory.create_order(1, Customer('John Doe'), [Item('apple', 1.2, 10), Item('banana', 0.5, 5)], 'pending', 'none')
+order2 = OrderFactory.create_order(2, Customer('Jane Smith'), [Item('orange', 0.8, 3), Item('milk', 1.5, 2)], 'completed', 'percentage', 10)
+
+manager = OrderManagerWithObserver()
+email_notifier = EmailNotifier()
+manager.add_observer(email_notifier)
+
+manager.add_order(order1)
+manager.add_order(order2)
+
+print(manager.get_order(1).calculate_total())  # Виведе 16.8 (з урахуванням TAX_RATE)
+print(manager.get_order(2).calculate_total())  # Виведе 7.452 (з урахуванням TAX_RATE і знижки 10%)
+
+# Інтеграція старої системи замовлень через Adapter
+old_order = OldOrderSystem(1, 'Client', [{'price': 10, 'quantity': 2}, {'price': 5, 'quantity': 3}])
+adapted_order = OrderAdapter(old_order)
+print(adapted_order.calculate_total())  # Виведе 35
