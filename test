@@ -1,0 +1,131 @@
+# тест.py
+
+import unittest
+from main import (PriceCalculator, Item, Customer, OrderStatus, NoDiscount, PercentageDiscount,
+                  Order, OrderManagerSingleton, OldOrderSystem, OrderAdapter,
+                  OrderManagerWithObserver, EmailNotifier)
+
+class TestPriceCalculator(unittest.TestCase):
+    def test_calculate_total(self):
+        calculator = PriceCalculator(10, 5)
+        self.assertEqual(calculator.calculate_total(), 50)
+
+    def test_calculate_total_with_zero_quantity(self):
+        calculator = PriceCalculator(10, 0)
+        self.assertEqual(calculator.calculate_total(), 0)
+
+class TestItem(unittest.TestCase):
+    def test_calculate_total_with_tax(self):
+        item = Item('apple', 1, 10)
+        self.assertAlmostEqual(item.calculate_total(), 12.0)
+
+    def test_calculate_total_with_zero_quantity(self):
+        item = Item('apple', 1, 0)
+        self.assertAlmostEqual(item.calculate_total(), 0.0)
+
+class TestCustomer(unittest.TestCase):
+    def test_customer_name(self):
+        customer = Customer('John Doe')
+        self.assertEqual(customer.name, 'John Doe')
+
+class TestOrderStatus(unittest.TestCase):
+    def test_order_is_pending(self):
+        status = OrderStatus('pending')
+        self.assertTrue(status.is_pending())
+        self.assertFalse(status.is_completed())
+
+    def test_order_is_completed(self):
+        status = OrderStatus('completed')
+        self.assertTrue(status.is_completed())
+        self.assertFalse(status.is_pending())
+
+class TestDiscountStrategies(unittest.TestCase):
+    def test_no_discount(self):
+        strategy = NoDiscount()
+        self.assertEqual(strategy.apply_discount(100), 100)
+
+    def test_percentage_discount(self):
+        strategy = PercentageDiscount(10)
+        self.assertAlmostEqual(strategy.apply_discount(100), 90.0)
+
+    def test_percentage_discount_zero(self):
+        strategy = PercentageDiscount(0)
+        self.assertAlmostEqual(strategy.apply_discount(100), 100.0)
+
+    def test_percentage_discount_100(self):
+        strategy = PercentageDiscount(100)
+        self.assertAlmostEqual(strategy.apply_discount(100), 0.0)
+
+class TestOrder(unittest.TestCase):
+    def test_order_calculate_total_without_discount(self):
+        order = Order(1, Customer('John Doe'), [Item('apple', 1, 10)], 'pending', NoDiscount())
+        self.assertAlmostEqual(order.calculate_total(), 12.0)
+
+    def test_order_calculate_total_with_discount(self):
+        order = Order(2, Customer('Jane Doe'), [Item('apple', 1, 10)], 'pending', PercentageDiscount(10))
+        self.assertAlmostEqual(order.calculate_total(), 10.8)
+
+    def test_order_calculate_total_empty_items(self):
+        order = Order(3, Customer('Jane Doe'), [], 'pending', NoDiscount())
+        self.assertAlmostEqual(order.calculate_total(), 0.0)
+
+class TestOrderManagerSingleton(unittest.TestCase):
+    def setUp(self):
+        OrderManagerSingleton._instance = None
+        self.manager = OrderManagerSingleton()
+
+    def test_add_order(self):
+        order = Order(1, Customer('John Doe'), [Item('apple', 1, 10)], 'pending', NoDiscount())
+        self.manager.add_order(order)
+        self.assertEqual(self.manager.get_order(1), order)
+
+    def test_remove_order(self):
+        order = Order(1, Customer('John Doe'), [Item('apple', 1, 10)], 'pending', NoDiscount())
+        self.manager.add_order(order)
+        self.manager.remove_order(1)
+        self.assertIsNone(self.manager.get_order(1))
+
+    def test_get_order_not_exist(self):
+        self.assertIsNone(self.manager.get_order(999))
+
+class TestOldOrderSystem(unittest.TestCase):
+    def test_total_price(self):
+        old_order = OldOrderSystem(1, 'Client', [{'price': 10, 'quantity': 2}, {'price': 5, 'quantity': 3}])
+        self.assertEqual(old_order.total_price(), 35)
+
+    def test_total_price_empty(self):
+        old_order = OldOrderSystem(2, 'Client', [])
+        self.assertEqual(old_order.total_price(), 0)
+
+class TestOrderAdapter(unittest.TestCase):
+    def test_adapter_calculate_total(self):
+        old_order = OldOrderSystem(1, 'Client', [{'price': 10, 'quantity': 2}, {'price': 5, 'quantity': 3}])
+        adapter = OrderAdapter(old_order)
+        self.assertEqual(adapter.calculate_total(), 35)
+
+    def test_adapter_calculate_total_empty(self):
+        old_order = OldOrderSystem(2, 'Client', [])
+        adapter = OrderAdapter(old_order)
+        self.assertEqual(adapter.calculate_total(), 0)
+
+class TestOrderManagerWithObserver(unittest.TestCase):
+    def setUp(self):
+        OrderManagerWithObserver._instance = None
+        self.manager = OrderManagerWithObserver()
+        self.email_notifier = EmailNotifier()
+        self.manager.add_observer(self.email_notifier)
+
+    def test_notify_observers(self):
+        order = Order(1, Customer('John Doe'), [Item('apple', 1, 10)], 'pending', NoDiscount())
+        with self.assertLogs(level='INFO') as log:
+            self.manager.add_order(order)
+            self.assertIn(f"Email sent for order {order.order_id} to {order.customer.name}", log.output[0])
+
+    def test_add_observer(self):
+        order = Order(2, Customer('Jane Doe'), [Item('banana', 1, 5)], 'completed', NoDiscount())
+        with self.assertLogs(level='INFO') as log:
+            self.manager.add_order(order)
+            self.assertIn(f"Email sent for order {order.order_id} to {order.customer.name}", log.output[0])
+
+if __name__ == '__main__':
+    unittest.main()
